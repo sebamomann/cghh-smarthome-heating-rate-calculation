@@ -1,0 +1,16 @@
+{
+  "name": "heizung_auswertung",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@influxdata/influxdb-client": "^1.20.0",
+    "dotenv": "^10.0.0",
+    "moment": "^2.29.1"
+  }
+}
