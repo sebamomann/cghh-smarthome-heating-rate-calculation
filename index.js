@@ -16,11 +16,13 @@ const queryApi = client.getQueryApi(org);
 var heatingIntervals = []; // {start: date, end: date, desired: number, reached: date}[]
 var rateInformations = {};
 
-const getIntervals = async (range, measurement) => {
+const getIntervals = async (range, name) => {
     const query = `from(bucket: "${bucket}") 
     |> range(start: -${range}) 
-    |> filter(fn: (r) => r["_measurement"] == "${measurement}") 
-    |> filter(fn: (r) => r["_field"] == "setTemperature")`;
+    |> filter(fn: (r) => r["_measurement"] == "sensoric") 
+    |> filter(fn: (r) => r["_field"] == "setTemperature")
+    |> filter(fn: (r) => r["name"] == "${name}")
+    |> filter(fn: (r) => r["type"] == "HEATING")`;
 
     const data = await queryApi.collectRows(query);
 
@@ -48,14 +50,16 @@ const getIntervals = async (range, measurement) => {
         lastTemp = value;
     });
 
-    await calculateDurations(range, measurement);
+    await calculateDurations(range, name);
 };
 
-const calculateDurations = async (range, measurement) => {
+const calculateDurations = async (range, name) => {
     const query = `from(bucket: "${bucket}") 
     |> range(start: -${range}) 
-    |> filter(fn: (r) => r["_measurement"] == "${measurement}") 
-    |> filter(fn: (r) => r["_field"] == "temperature")`;
+    |> filter(fn: (r) => r["_measurement"] == "sensoric") 
+    |> filter(fn: (r) => r["_field"] == "temperature")
+    |> filter(fn: (r) => r["name"] == "${name}")
+    |> filter(fn: (r) => r["type"] == "HEATING")`;
 
     const maxIndex = heatingIntervals.length;
 
@@ -76,6 +80,7 @@ const calculateDurations = async (range, measurement) => {
         if (moment(date).isBetween(moment(heatingIntervals[intervalIndex].start), moment(heatingIntervals[intervalIndex].end))) {
             if (!heatingIntervals[intervalIndex].startTemp) {
                 heatingIntervals[intervalIndex].startTemp = value;
+                lastTemp = value; // reset last temp for llater check if window open
             }
 
             const tempIsAlreadyHigher = value >= heatingIntervals[intervalIndex].desired;
@@ -86,6 +91,12 @@ const calculateDurations = async (range, measurement) => {
 
                 intervalIndex++;
             } else {
+                if (i > 1 && value < lastTemp) {
+                    delete heatingIntervals[intervalIndex];
+                    intervalIndex++;
+                    return;
+                }
+
                 lastDate = date;
                 lastTemp = value;
             }
@@ -94,7 +105,7 @@ const calculateDurations = async (range, measurement) => {
         }
     });
 
-    calculateHeatingRate(measurement);
+    calculateHeatingRate(name);
 };
 
 const calculateHeatingRate = (measurement) => {
@@ -116,6 +127,7 @@ const calculateHeatingRate = (measurement) => {
         const ratePerDegree = Math.round(heatingRate * 100) / 100;
 
         calculatedHeatingRates.push({
+            startTemp: interval.startTemp,
             neededDegrees: neededDegrees,
             ratePerDegree: ratePerDegree,
         });
@@ -126,15 +138,14 @@ const calculateHeatingRate = (measurement) => {
 };
 
 const run = async () => {
-    const range = "30d";
-    const measurements = ["Godi-Saal", "Seitenbereich", "Jugendraum EG", "Jugendraum 2. OG", "Kleinkindbereich", "Foyer"];
+    const range = "44d";
+    const measurements = ["Godi-Saal", "Seitenbereich", "Jugendraum_EG", "Jugendraum_2._OG"];
 
     for (let measurement of measurements) {
         heatingIntervals = [];
         await getIntervals(range, measurement);
     }
 
-    // console.log(rateInformations);
 
     for (let [key, value] of Object.entries(rateInformations)) {
         const name = key;
@@ -143,6 +154,26 @@ const run = async () => {
             if (!v) return;
             console.log(String(v.neededDegrees).replace(".", ",") + ";" + String(v.ratePerDegree).replace(".", ","));
         });
+    }
+
+    console.log("-----------------------------");
+    console.log("-----------------------------");
+    console.log("-----------------------------");
+    console.log("-----------------------------");
+    console.log("-----------------------------");
+    const minTemp = 13;
+    const maxTemp = 20;
+    for (let [key, value] of Object.entries(rateInformations)) {
+        const name = key;
+        console.log(name);
+        for (let i = minTemp; i < maxTemp; i++) {
+            const tempSpec = value.filter(v => v.startTemp > i && v.startTemp <= i + 1);
+            console.log("Temp: " + i + " - " + (i + 1));
+            tempSpec.forEach((v) => {
+                if (!v) return;
+                console.log(String(v.neededDegrees).replace(".", ",") + ";" + String(v.ratePerDegree).replace(".", ","));
+            });
+        }
     }
 };
 
